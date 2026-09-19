@@ -201,6 +201,10 @@
   .passage-title{font-family:var(--sans);font-size:13px;color:var(--gold);margin-bottom:6px;}
   .passage-text{font-family:var(--serif);font-size:calc(16.5px * var(--scripture-scale));line-height:1.7;color:var(--ink);}
   .passage-text sup{color:var(--gold);font-size:11px;margin-right:1px;}
+  .verse-unit{cursor:pointer;border-radius:3px;transition:background-color .15s ease;}
+  .verse-unit:hover{background:rgba(214,181,106,0.12);}
+  .verse-unit.bm{background:rgba(214,181,106,0.30);box-shadow:0 0 0 1px var(--gold-dim);}
+  .tts-word.tts-active{background:rgba(214,181,106,0.55);border-radius:3px;box-shadow:0 0 0 1px var(--gold);}
   .passage-text .loading-text{color:var(--ink-dim2);font-style:italic;}
   .passage-text .passage-error{color:var(--ink-dim2);font-style:italic;font-size:14px;}
   .translation-credit{font-family:var(--sans);font-size:11.5px;color:var(--ink-dim);margin:4px 0 18px;text-align:right;}
@@ -320,6 +324,26 @@
   .social-btn.x{background:#000;}
   .social-btn.threads{background:#000;}
 
+  .onboarding-overlay{
+    position:fixed;inset:0;background:rgba(16,24,39,0.72);z-index:100;
+    display:flex;align-items:center;justify-content:center;padding:20px;
+  }
+  .onboarding-card{
+    background:var(--surface);border-radius:20px;padding:30px 26px 26px;max-width:400px;width:100%;
+    box-shadow:0 12px 40px rgba(16,24,39,0.3);animation:riseIn .35s ease both;
+  }
+  .onboarding-dots{display:flex;gap:6px;margin-bottom:18px;}
+  .onboarding-dot{width:7px;height:7px;border-radius:50%;background:var(--line);}
+  .onboarding-dot.active{background:var(--gold);}
+  .onboarding-card h3{font-family:var(--serif);font-weight:600;font-size:22px;margin:0 0 10px;color:var(--ink);}
+  .onboarding-card p{font-family:var(--sans);font-size:14px;color:var(--ink-dim);line-height:1.6;margin:0 0 22px;}
+  .onboarding-actions{display:flex;justify-content:space-between;align-items:center;}
+  .onboarding-skip{background:none;border:none;color:var(--ink-dim);font-family:var(--sans);font-size:13px;cursor:pointer;}
+  .onboarding-next{
+    background:var(--gold-bright);border:none;color:var(--navy);font-family:var(--sans);
+    font-weight:600;font-size:13.5px;padding:10px 22px;border-radius:8px;cursor:pointer;
+  }
+
   .chat-fab{
     position:fixed;bottom:22px;right:22px;width:56px;height:56px;border-radius:50%;
     background:var(--gold-bright);border:none;color:var(--navy);font-size:24px;cursor:pointer;
@@ -411,6 +435,7 @@
     <div class="streak-row">
       <span class="streak-badge" id="streakBadge"></span>
       <span class="encouragement" id="encouragement"></span>
+      <span class="streak-badge" id="readerCountBadge" hidden></span>
     </div>
   </div>
 
@@ -438,6 +463,10 @@
 </div>
 
 <button class="chat-fab" id="chatFab" aria-label="Assistant">💬</button>
+<div class="onboarding-overlay" id="onboardingOverlay" hidden>
+  <div class="onboarding-card" id="onboardingCard"></div>
+</div>
+
 <div class="chat-panel" id="chatPanel" hidden>
   <div class="chat-header">
     <span id="chatTitle">365 Grace</span>
@@ -579,6 +608,7 @@
       downloadMed:"⬇ Télécharger mes méditations", noMedToDownload:"Vous n'avez encore écrit aucune méditation.",
       reminderLabel:"Rappel de lecture quotidien", reminderBtn:"📅 Télécharger le rappel (.ics)",
       reminderNote:"Ajoute un événement quotidien répété dans votre calendrier (Apple Calendar, Google Calendar, Outlook…) à l'heure choisie.",
+      replayTour:"❓ Revoir la visite guidée",
       shareImage:"🖼 Créer une image", generatingImage:"Génération de l'image…",
       dayCard:"📱 Carte du jour",
       chatWelcome:"Bonjour ! Je suis là pour répondre à vos questions sur la Bible ou vous accompagner dans votre lecture. Que puis-je faire pour vous ?",
@@ -624,6 +654,7 @@
       downloadMed:"⬇ Download my meditations", noMedToDownload:"You haven't written any meditations yet.",
       reminderLabel:"Daily reading reminder", reminderBtn:"📅 Download reminder (.ics)",
       reminderNote:"Adds a repeating daily event to your calendar (Apple Calendar, Google Calendar, Outlook…) at the chosen time.",
+      replayTour:"❓ Replay the guided tour",
       shareImage:"🖼 Create an image", generatingImage:"Generating image…",
       dayCard:"📱 Day card",
       chatWelcome:"Hi! I'm here to answer your Bible questions or accompany your reading. How can I help?",
@@ -745,8 +776,20 @@
     }
   }
 
-  function renderVerses(verses){
-    return verses.map(v => `<sup>${v.number}</sup> ${v.text}`).join(" ");
+  function renderVerses(verses, usfm, chapter){
+    return verses.map(v => {
+      const key = usfm+'-'+chapter+'-'+v.number;
+      const bm = state.bookmarks && state.bookmarks[key] ? ' bm' : '';
+      return `<span class="verse-unit${bm}" data-key="${key}" role="button" tabindex="0"><sup>${v.number}</sup> ${v.text}</span>`;
+    }).join(' ');
+  }
+
+  function toggleVerseBookmark(unit){
+    const key = unit.dataset.key;
+    if(!state.bookmarks) state.bookmarks = {};
+    state.bookmarks[key] = !state.bookmarks[key];
+    unit.classList.toggle('bm', !!state.bookmarks[key]);
+    saveState();
   }
 
   async function fetchVerse(lang2, usfm, chapterNum, verseNum){
@@ -756,20 +799,59 @@
     return v ? { text:v.text } : { error:true };
   }
 
-  function collectReadableText(){
-    const parts = [];
-    document.querySelectorAll('#dayDetail .passage-text').forEach(el=>{
-      const clone = el.cloneNode(true);
-      clone.querySelectorAll('sup').forEach(s=>s.remove());
-      const txt = clone.textContent.trim();
-      if(txt) parts.push(txt);
-    });
+  function indexTTSWords(){
+    const counter = { i: 0 };
+    const els = [];
+    document.querySelectorAll('#dayDetail .passage-text').forEach(el=>els.push(el));
     const verseEl = document.querySelector('#dayDetail .verse-text');
-    if(verseEl){
-      const txt = verseEl.textContent.trim();
-      if(txt) parts.push(txt);
+    if(verseEl) els.push(verseEl);
+    els.forEach(el=>{
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+        acceptNode(node){
+          return (node.parentElement && node.parentElement.tagName === 'SUP')
+            ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+        }
+      });
+      const textNodes = [];
+      let node;
+      while(node = walker.nextNode()) textNodes.push(node);
+      textNodes.forEach(tn=>{
+        const tokens = tn.textContent.split(/(\s+)/);
+        const frag = document.createDocumentFragment();
+        tokens.forEach(tok=>{
+          if(tok.trim()===''){ frag.appendChild(document.createTextNode(tok)); }
+          else {
+            const span = document.createElement('span');
+            span.className = 'tts-word';
+            span.dataset.idx = counter.i++;
+            span.textContent = tok;
+            frag.appendChild(span);
+          }
+        });
+        tn.parentNode.replaceChild(frag, tn);
+      });
+    });
+  }
+
+  function collectReadableText(){
+    const words = document.querySelectorAll('#dayDetail .tts-word');
+    return Array.from(words).map(w=>w.textContent).join(' ');
+  }
+
+  let ttsActiveEl = null;
+  function highlightTTSWord(idx){
+    if(ttsActiveEl) ttsActiveEl.classList.remove('tts-active');
+    const el = document.querySelector('#dayDetail .tts-word[data-idx="'+idx+'"]');
+    if(el){
+      el.classList.add('tts-active');
+      el.scrollIntoView({behavior:'smooth', block:'center'});
+      ttsActiveEl = el;
+    } else {
+      ttsActiveEl = null;
     }
-    return parts.join('. ');
+  }
+  function clearTTSHighlight(){
+    if(ttsActiveEl){ ttsActiveEl.classList.remove('tts-active'); ttsActiveEl = null; }
   }
 
   function updateListenBtn(isSpeaking){
@@ -782,6 +864,7 @@
     if('speechSynthesis' in window && window.speechSynthesis.speaking){
       window.speechSynthesis.cancel();
     }
+    clearTTSHighlight();
     updateListenBtn(false);
   }
 
@@ -796,11 +879,17 @@
     }
     const text = collectReadableText();
     if(!text) return;
+    let wordCounter = -1;
     const utter = new SpeechSynthesisUtterance(text);
     utter.lang = lang === 'fr' ? 'fr-FR' : 'en-US';
     utter.rate = 0.95;
-    utter.onend = ()=> updateListenBtn(false);
-    utter.onerror = ()=> updateListenBtn(false);
+    utter.onboundary = (e)=>{
+      if(e.name && e.name !== 'word') return;
+      wordCounter++;
+      highlightTTSWord(wordCounter);
+    };
+    utter.onend = ()=>{ updateListenBtn(false); clearTTSHighlight(); };
+    utter.onerror = ()=>{ updateListenBtn(false); clearTTSHighlight(); };
     window.speechSynthesis.speak(utter);
     updateListenBtn(true);
   }
@@ -944,7 +1033,7 @@
   let lang = "fr";
   let currentMonth = 0;
   let currentDetailDay = null;
-  let state = { read:{}, med:{}, favorites:{}, streak:{count:0,best:0,lastDate:null}, settings:{theme:'light',scale:1,startDate:null,reminderTime:'07:00'} };
+  let state = { read:{}, med:{}, favorites:{}, bookmarks:{}, streak:{count:0,best:0,lastDate:null}, settings:{theme:'light',scale:1,startDate:null,reminderTime:'07:00',tourSeen:false,countedVisit:false} };
 
   function todayDayOfYear(){
     if(state.settings.startDate){
@@ -979,8 +1068,9 @@
         state.read = parsed.read || {};
         state.med = parsed.med || {};
         state.favorites = parsed.favorites || {};
+        state.bookmarks = parsed.bookmarks || {};
         state.streak = parsed.streak || {count:0,best:0,lastDate:null};
-        state.settings = Object.assign({theme:'light',scale:1,startDate:null}, parsed.settings||{});
+        state.settings = Object.assign({theme:'light',scale:1,startDate:null,reminderTime:'07:00',tourSeen:false,countedVisit:false}, parsed.settings||{});
       }
     }catch(e){ /* no saved state yet, or storage unavailable */ }
   }
@@ -1047,6 +1137,7 @@
     const dark = state.settings.theme === 'dark';
     $('themeToggle').textContent = t[dark ? 'themeToLight' : 'themeToDark'];
     $('chatInput').placeholder = t.chatPlaceholder;
+    if(lastReaderCount !== null) updateReaderCountBadge(lastReaderCount);
   }
 
   function renderStreak(){
@@ -1444,6 +1535,10 @@
       </div>
 
       <div class="settings-field">
+        <button class="settings-btn" id="replayTourBtn">${t.replayTour}</button>
+      </div>
+
+      <div class="settings-field">
         <label>${t.shareSiteTitle}</label>
         <div class="settings-row">
           <button class="settings-btn primary" id="shareNativeBtn">${t.shareNative}</button>
@@ -1483,6 +1578,7 @@
       saveState();
       downloadReminderICS(timeVal);
     };
+    $('replayTourBtn').onclick = ()=>{ openOnboarding(); };
 
     const shareUrl = window.location.href;
     const shareText = t.shareInviteText;
@@ -1788,6 +1884,7 @@
         const name = lang==='fr' ? translationNames.fr : translationNames.en;
         creditEl.textContent = name ? (lang==='fr' ? 'Texte : '+name : 'Text: '+name) : '';
       }
+      indexTTSWords();
     }
   }
 
@@ -1799,7 +1896,7 @@
       el.innerHTML = `<span class="passage-error">${lang==='fr' ? 'Texte indisponible pour le moment.' : 'Text unavailable right now.'}</span>`;
       return;
     }
-    el.innerHTML = renderVerses(result.verses);
+    el.innerHTML = renderVerses(result.verses, usfm, chapterNum);
   }
 
   function renderAll(){
@@ -1932,6 +2029,89 @@
     if(e.key === 'Enter') sendChatMessage();
   });
 
+  document.getElementById('dayDetail').addEventListener('click', (e)=>{
+    const unit = e.target.closest('.verse-unit');
+    if(unit) toggleVerseBookmark(unit);
+  });
+  document.getElementById('dayDetail').addEventListener('keydown', (e)=>{
+    if(e.key!=='Enter' && e.key!==' ') return;
+    const unit = e.target.closest('.verse-unit');
+    if(unit){ e.preventDefault(); toggleVerseBookmark(unit); }
+  });
+
+  // ---------- READER COUNTER (shared storage only — see note in chat) ----------
+  let lastReaderCount = null;
+
+  function updateReaderCountBadge(count){
+    lastReaderCount = count;
+    const badge = $('readerCountBadge');
+    if(!badge) return;
+    const text = lang==='fr'
+      ? '🌍 ' + count.toLocaleString('fr-FR') + ' personnes lisent avec 365 Grâce'
+      : '🌍 ' + count.toLocaleString('en-US') + ' people reading with 365 Grace';
+    badge.textContent = text;
+    badge.hidden = false;
+  }
+
+  async function initReaderCounter(){
+    if(!hasClaudeStorage) return; // no real shared backend on the deployed static site yet
+    try{
+      const res = await window.storage.get('reader-count', true);
+      let count = (res && res.value) ? parseInt(res.value, 10) : 0;
+      if(!state.settings.countedVisit){
+        count += 1;
+        await window.storage.set('reader-count', String(count), true);
+        state.settings.countedVisit = true;
+        saveState();
+      }
+      updateReaderCountBadge(count);
+    }catch(e){ /* keep badge hidden */ }
+  }
+
+  // ---------- ONBOARDING TOUR ----------
+  const ONBOARDING_STEPS = [
+    { fr:{title:"Bienvenue dans 365 Grâce", text:"Un parcours de lecture biblique sur 365 jours, avec un verset, une lecture et un espace pour votre méditation chaque jour."},
+      en:{title:"Welcome to 365 Grace", text:"A 365-day Bible reading journey, with a verse, a reading, and space for your own reflection every day."} },
+    { fr:{title:"Chaque jour, une lecture", text:"La carte « Continuer ma lecture » vous amène directement à aujourd'hui. Basculez entre la vue par mois et la vue annuelle, ou cherchez un jour, un livre ou un verset."},
+      en:{title:"Every day, a reading", text:"The \"Continue reading\" card takes you straight to today. Switch between the monthly and full-year views, or search for a day, book, or verse."} },
+    { fr:{title:"Gardez une trace", text:"Marquez vos jours lus, touchez un verset dans le texte pour le signaler, sauvegardez vos favoris, écrivez vos réflexions, et ajustez le thème ou la taille du texte dans les Paramètres (⚙)."},
+      en:{title:"Keep track", text:"Mark your days as read, tap a verse in the text to flag it, save favorites, write reflections, and adjust the theme or text size in Settings (⚙)."} }
+  ];
+  let onboardingStep = 0;
+
+  function renderOnboarding(){
+    const step = ONBOARDING_STEPS[onboardingStep];
+    const content = step[lang];
+    const isLast = onboardingStep === ONBOARDING_STEPS.length - 1;
+    const dots = ONBOARDING_STEPS.map((_,i)=>`<span class="onboarding-dot${i===onboardingStep?' active':''}"></span>`).join('');
+    const skipLabel = lang==='fr' ? 'Passer' : 'Skip';
+    const nextLabel = isLast ? (lang==='fr' ? "C'est parti !" : "Let's go!") : (lang==='fr' ? 'Suivant' : 'Next');
+    $('onboardingCard').innerHTML = `
+      <div class="onboarding-dots">${dots}</div>
+      <h3>${content.title}</h3>
+      <p>${content.text}</p>
+      <div class="onboarding-actions">
+        <button class="onboarding-skip" id="onboardingSkipBtn">${skipLabel}</button>
+        <button class="onboarding-next" id="onboardingNextBtn">${nextLabel}</button>
+      </div>
+    `;
+    $('onboardingSkipBtn').onclick = closeOnboarding;
+    $('onboardingNextBtn').onclick = ()=>{
+      if(isLast) closeOnboarding();
+      else { onboardingStep++; renderOnboarding(); }
+    };
+  }
+  function openOnboarding(){
+    onboardingStep = 0;
+    renderOnboarding();
+    $('onboardingOverlay').hidden = false;
+  }
+  function closeOnboarding(){
+    $('onboardingOverlay').hidden = true;
+    state.settings.tourSeen = true;
+    saveState();
+  }
+
   // ---------- INIT ----------
   if('serviceWorker' in navigator){
     window.addEventListener('load', ()=>{
@@ -1945,6 +2125,8 @@
     applyScriptureScale();
     currentMonth = dayToMonthIndex(todayDayOfYear());
     renderAll();
+    initReaderCounter();
+    if(!state.settings.tourSeen){ openOnboarding(); }
   })();
 
 })();
